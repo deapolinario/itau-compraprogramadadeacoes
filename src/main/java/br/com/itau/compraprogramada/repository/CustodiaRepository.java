@@ -15,6 +15,6 @@ public interface CustodiaRepository extends JpaRepository<Custodia, Long> {
     List<Custodia> findAllByContaId(Long contaId);
     List<Custodia> findAllByContaIdAndQuantidadeGreaterThan(Long contaId, Long quantidade);
     
-    @Query("SELECT c FROM Custodia c WHERE c.conta.id IN :contaIds AND c.ticker IN :tickers")
+    @Query("SELECT c FROM Custodia c JOIN FETCH c.conta WHERE c.conta.id IN :contaIds AND c.ticker IN :tickers")
     List<Custodia> findAllByContaInAndTickerIn(@Param("contaIds") List<Long> contaIds, @Param("tickers") List<String> tickers);
 }

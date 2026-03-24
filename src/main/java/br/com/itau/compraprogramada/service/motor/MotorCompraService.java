@@ -163,7 +163,11 @@ public class MotorCompraService {
                 .collect(Collectors.toMap(
                         c -> c.getConta().getId() + ":" + c.getTicker(),
                         c -> c,
-                        (existing, replacement) -> existing
+                        (existing, replacement) -> {
+                            log.warn("Custódia duplicada detectada para conta+ticker '{}:{}'. Mantendo registro existente.",
+                                    existing.getConta().getId(), existing.getTicker());
+                            return existing;
+                        }
                 ));
 
         for (ItemCesta item : cesta.getItens()) {

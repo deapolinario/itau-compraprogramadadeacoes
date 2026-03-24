@@ -79,6 +79,8 @@ public class FiscalService {
             return;
         }
 
+        // Publica mesmo com IR zero: a notificação é obrigatória para o sistema fiscal
+        // sempre que as vendas superam o limite de isenção, independentemente de haver lucro.
         BigDecimal valorIR = lucroLiquido.compareTo(BigDecimal.ZERO) <= 0
                 ? BigDecimal.ZERO
                 : lucroLiquido.multiply(ALIQUOTA_IR_VENDA).setScale(2, RoundingMode.HALF_UP);

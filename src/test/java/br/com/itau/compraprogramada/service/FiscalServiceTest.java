@@ -29,12 +29,13 @@ class FiscalServiceTest {
     @Mock private EventoKafkaRepository eventoKafkaRepository;
     @Mock private HistoricoOperacaoRepository historicoRepository;
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private FiscalService fiscalService;
     private Cliente cliente;
 
     @BeforeEach
     void setup() {
-        fiscalService = new FiscalService(kafkaTemplate, eventoKafkaRepository, historicoRepository, new ObjectMapper());
+        fiscalService = new FiscalService(kafkaTemplate, eventoKafkaRepository, historicoRepository, objectMapper);
         cliente = new Cliente("João", "12345678901", "j@e.com", BigDecimal.valueOf(3000));
         cliente.setId(1L);
         lenient().when(eventoKafkaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -130,8 +131,7 @@ class FiscalServiceTest {
 
         String payload = (String) payloadCaptor.getValue();
         @SuppressWarnings("unchecked")
-        java.util.Map<String, Object> mensagem = new com.fasterxml.jackson.databind.ObjectMapper()
-                .readValue(payload, java.util.Map.class);
+        java.util.Map<String, Object> mensagem = objectMapper.readValue(payload, java.util.Map.class);
         assertThat(new BigDecimal(mensagem.get("valorIR").toString()))
                 .isEqualByComparingTo("1000.00");
         assertThat(mensagem.get("tipo")).isEqualTo("IR_VENDA");

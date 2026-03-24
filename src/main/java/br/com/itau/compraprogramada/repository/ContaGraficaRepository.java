@@ -15,6 +15,6 @@ public interface ContaGraficaRepository extends JpaRepository<ContaGrafica, Long
     Optional<ContaGrafica> findByClienteIdAndTipo(Long clienteId, TipoConta tipo);
     Optional<ContaGrafica> findByTipo(TipoConta tipo);
     
-    @Query("SELECT c FROM ContaGrafica c WHERE c.cliente.id IN :clienteIds AND c.tipo = :tipo")
+    @Query("SELECT c FROM ContaGrafica c JOIN FETCH c.cliente WHERE c.cliente.id IN :clienteIds AND c.tipo = :tipo")
     List<ContaGrafica> findAllByClienteInAndTipo(@Param("clienteIds") List<Long> clienteIds, @Param("tipo") TipoConta tipo);
 }
