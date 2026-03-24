@@ -1,0 +1,386 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-03-22",
+  "__export_source": "insomnia.desktop.app",
+  "resources": [
+    {
+      "_id": "wrk_compra_programada",
+      "_type": "workspace",
+      "name": "Compra Programada — Itaú Corretora",
+      "description": "Collection para testar a API do Sistema de Compra Programada de Ações",
+      "scope": "collection"
+    },
+    {
+      "_id": "env_base",
+      "_type": "environment",
+      "parentId": "wrk_compra_programada",
+      "name": "Local",
+      "data": {
+        "base_url": "http://localhost:8080",
+        "cliente_id": 1,
+        "cesta_id": 1
+      },
+      "isPrivate": false
+    },
+    {
+      "_id": "fld_clientes",
+      "_type": "request_group",
+      "parentId": "wrk_compra_programada",
+      "name": "Clientes",
+      "description": "Gestão de clientes do produto de compra programada"
+    },
+    {
+      "_id": "req_aderir",
+      "_type": "request",
+      "parentId": "fld_clientes",
+      "name": "Aderir ao produto",
+      "method": "POST",
+      "url": "{{ _.base_url }}/clientes",
+      "description": "Cadastra um novo cliente no produto de compra programada.\n\nValidações:\n- nome: obrigatório\n- cpf: 11 dígitos numéricos\n- email: formato válido\n- valorMensal: mínimo R$ 100,00",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"nome\": \"João Silva\",\n  \"cpf\": \"12345678901\",\n  \"email\": \"joao.silva@email.com\",\n  \"valorMensal\": 3000.00\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_aderir_valor_minimo",
+      "_type": "request",
+      "parentId": "fld_clientes",
+      "name": "Aderir ao produto (valor mínimo)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/clientes",
+      "description": "Cadastra cliente com aporte mínimo de R$ 100,00.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"nome\": \"Maria Souza\",\n  \"cpf\": \"98765432100\",\n  \"email\": \"maria.souza@email.com\",\n  \"valorMensal\": 100.00\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_aderir_invalido",
+      "_type": "request",
+      "parentId": "fld_clientes",
+      "name": "Aderir ao produto (inválido — valor abaixo do mínimo)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/clientes",
+      "description": "Espera HTTP 400 Bad Request — valorMensal abaixo de R$ 100,00.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"nome\": \"Carlos Teste\",\n  \"cpf\": \"11122233344\",\n  \"email\": \"carlos@email.com\",\n  \"valorMensal\": 50.00\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_consultar_cliente",
+      "_type": "request",
+      "parentId": "fld_clientes",
+      "name": "Consultar cliente",
+      "method": "GET",
+      "url": "{{ _.base_url }}/clientes/{{ _.cliente_id }}",
+      "description": "Retorna os dados do cliente pelo ID.\n\nAjuste a variável `cliente_id` no Environment para o ID retornado pela requisição de adesão.",
+      "headers": []
+    },
+    {
+      "_id": "req_alterar_valor_mensal",
+      "_type": "request",
+      "parentId": "fld_clientes",
+      "name": "Alterar valor mensal",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/clientes/{{ _.cliente_id }}/valor-mensal",
+      "description": "Atualiza o valor mensal de aporte do cliente.\n\nO novo valor passa a valer no próximo ciclo de compra.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"valorMensal\": 5000.00\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_sair",
+      "_type": "request",
+      "parentId": "fld_clientes",
+      "name": "Sair do produto",
+      "method": "DELETE",
+      "url": "{{ _.base_url }}/clientes/{{ _.cliente_id }}",
+      "description": "Desativa o cliente. O cliente não receberá mais compras nos próximos ciclos.\n\nNão remove a custódia existente.",
+      "headers": []
+    },
+    {
+      "_id": "req_cliente_inexistente",
+      "_type": "request",
+      "parentId": "fld_clientes",
+      "name": "Consultar cliente inexistente (404)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/clientes/99999",
+      "description": "Espera HTTP 404 Not Found.",
+      "headers": []
+    },
+    {
+      "_id": "fld_cesta",
+      "_type": "request_group",
+      "parentId": "wrk_compra_programada",
+      "name": "Cesta Top Five",
+      "description": "Gestão da cesta de recomendação de 5 ações"
+    },
+    {
+      "_id": "req_criar_cesta",
+      "_type": "request",
+      "parentId": "fld_cesta",
+      "name": "Criar cesta Top Five",
+      "method": "POST",
+      "url": "{{ _.base_url }}/cestas",
+      "description": "Cria uma nova cesta de recomendação.\n\nValidações:\n- Exatamente 5 ativos\n- Soma dos percentuais = 100%\n- Cada percentual > 0%\n\nAo criar uma nova cesta, o sistema dispara automaticamente o rebalanceamento assíncrono das carteiras de todos os clientes ativos.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"itens\": [\n    { \"ticker\": \"PETR4\", \"percentual\": 30.00 },\n    { \"ticker\": \"VALE3\", \"percentual\": 25.00 },\n    { \"ticker\": \"ITUB4\", \"percentual\": 20.00 },\n    { \"ticker\": \"BBDC4\", \"percentual\": 15.00 },\n    { \"ticker\": \"WEGE3\", \"percentual\": 10.00 }\n  ]\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_criar_cesta_rebalanceamento",
+      "_type": "request",
+      "parentId": "fld_cesta",
+      "name": "Criar cesta (novo rebalanceamento — troca BBDC4 por ABEV3)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/cestas",
+      "description": "Substitui BBDC4 por ABEV3. O sistema irá:\n1. Vender toda a posição de BBDC4 dos clientes\n2. Comprar ABEV3 proporcionalmente\n3. Calcular IR sobre as vendas de BBDC4",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"itens\": [\n    { \"ticker\": \"PETR4\", \"percentual\": 30.00 },\n    { \"ticker\": \"VALE3\", \"percentual\": 25.00 },\n    { \"ticker\": \"ITUB4\", \"percentual\": 20.00 },\n    { \"ticker\": \"ABEV3\", \"percentual\": 15.00 },\n    { \"ticker\": \"WEGE3\", \"percentual\": 10.00 }\n  ]\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_criar_cesta_invalida_soma",
+      "_type": "request",
+      "parentId": "fld_cesta",
+      "name": "Criar cesta inválida (soma ≠ 100%)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/cestas",
+      "description": "Espera HTTP 422 — percentuais somam 95% em vez de 100%.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"itens\": [\n    { \"ticker\": \"PETR4\", \"percentual\": 25.00 },\n    { \"ticker\": \"VALE3\", \"percentual\": 20.00 },\n    { \"ticker\": \"ITUB4\", \"percentual\": 20.00 },\n    { \"ticker\": \"BBDC4\", \"percentual\": 15.00 },\n    { \"ticker\": \"WEGE3\", \"percentual\": 15.00 }\n  ]\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_criar_cesta_invalida_ativos",
+      "_type": "request",
+      "parentId": "fld_cesta",
+      "name": "Criar cesta inválida (menos de 5 ativos)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/cestas",
+      "description": "Espera HTTP 400 — a cesta deve conter exatamente 5 ações.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"itens\": [\n    { \"ticker\": \"PETR4\", \"percentual\": 60.00 },\n    { \"ticker\": \"VALE3\", \"percentual\": 40.00 }\n  ]\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_buscar_cesta_ativa",
+      "_type": "request",
+      "parentId": "fld_cesta",
+      "name": "Buscar cesta ativa",
+      "method": "GET",
+      "url": "{{ _.base_url }}/cestas/ativa",
+      "description": "Retorna a cesta de recomendação atualmente ativa com seus 5 ativos e percentuais.",
+      "headers": []
+    },
+    {
+      "_id": "fld_carteira",
+      "_type": "request_group",
+      "parentId": "wrk_compra_programada",
+      "name": "Carteira e Rentabilidade",
+      "description": "Consulta de posição e rentabilidade da carteira do cliente"
+    },
+    {
+      "_id": "req_consultar_carteira",
+      "_type": "request",
+      "parentId": "fld_carteira",
+      "name": "Consultar carteira do cliente",
+      "method": "GET",
+      "url": "{{ _.base_url }}/clientes/{{ _.cliente_id }}/carteira",
+      "description": "Retorna a posição consolidada da carteira do cliente com:\n- Valor investido total (preço médio × quantidade)\n- Valor atual (cotação COTAHIST × quantidade)\n- P/L (lucro ou prejuízo absoluto)\n- Rentabilidade percentual\n- Detalhamento por ativo\n\nRequer arquivo COTAHIST no diretório configurado.",
+      "headers": []
+    },
+    {
+      "_id": "req_consultar_carteira_inexistente",
+      "_type": "request",
+      "parentId": "fld_carteira",
+      "name": "Consultar carteira — cliente inexistente (404)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/clientes/99999/carteira",
+      "description": "Espera HTTP 404 Not Found.",
+      "headers": []
+    },
+    {
+      "_id": "fld_fluxo_completo",
+      "_type": "request_group",
+      "parentId": "wrk_compra_programada",
+      "name": "Fluxo Completo (Execute em ordem)",
+      "description": "Sequência completa para demonstrar o funcionamento do produto.\n\nExecute as requisições nesta ordem:\n1. Criar cesta Top Five\n2. Aderir (Cliente A)\n3. Aderir (Cliente B)\n4. Consultar clientes\n5. Alterar valor mensal\n6. Consultar cesta ativa\n7. Criar nova cesta (dispara rebalanceamento)\n8. Consultar carteira"
+    },
+    {
+      "_id": "req_fluxo_1_cesta",
+      "_type": "request",
+      "parentId": "fld_fluxo_completo",
+      "name": "1. Criar cesta inicial",
+      "method": "POST",
+      "url": "{{ _.base_url }}/cestas",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"itens\": [\n    { \"ticker\": \"PETR4\", \"percentual\": 30.00 },\n    { \"ticker\": \"VALE3\", \"percentual\": 25.00 },\n    { \"ticker\": \"ITUB4\", \"percentual\": 20.00 },\n    { \"ticker\": \"BBDC4\", \"percentual\": 15.00 },\n    { \"ticker\": \"WEGE3\", \"percentual\": 10.00 }\n  ]\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_fluxo_2_cliente_a",
+      "_type": "request",
+      "parentId": "fld_fluxo_completo",
+      "name": "2. Aderir — Cliente A (R$ 3.000/mês)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/clientes",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"nome\": \"João Silva\",\n  \"cpf\": \"12345678901\",\n  \"email\": \"joao.silva@email.com\",\n  \"valorMensal\": 3000.00\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_fluxo_3_cliente_b",
+      "_type": "request",
+      "parentId": "fld_fluxo_completo",
+      "name": "3. Aderir — Cliente B (R$ 1.500/mês)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/clientes",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"nome\": \"Maria Souza\",\n  \"cpf\": \"98765432100\",\n  \"email\": \"maria.souza@email.com\",\n  \"valorMensal\": 1500.00\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_fluxo_4_consultar_a",
+      "_type": "request",
+      "parentId": "fld_fluxo_completo",
+      "name": "4. Consultar Cliente A",
+      "method": "GET",
+      "url": "{{ _.base_url }}/clientes/1",
+      "headers": []
+    },
+    {
+      "_id": "req_fluxo_5_alterar_valor",
+      "_type": "request",
+      "parentId": "fld_fluxo_completo",
+      "name": "5. Alterar valor mensal — Cliente A para R$ 5.000",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/clientes/1/valor-mensal",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"valorMensal\": 5000.00\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_fluxo_6_cesta_ativa",
+      "_type": "request",
+      "parentId": "fld_fluxo_completo",
+      "name": "6. Consultar cesta ativa",
+      "method": "GET",
+      "url": "{{ _.base_url }}/cestas/ativa",
+      "headers": []
+    },
+    {
+      "_id": "req_fluxo_7_rebalanceamento",
+      "_type": "request",
+      "parentId": "fld_fluxo_completo",
+      "name": "7. Nova cesta (dispara rebalanceamento assíncrono)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/cestas",
+      "description": "Troca BBDC4 por RENT3 e redistribui percentuais.\nO rebalanceamento ocorre em background — HTTP 201 retorna imediatamente.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"itens\": [\n    { \"ticker\": \"PETR4\", \"percentual\": 30.00 },\n    { \"ticker\": \"VALE3\", \"percentual\": 25.00 },\n    { \"ticker\": \"ITUB4\", \"percentual\": 20.00 },\n    { \"ticker\": \"RENT3\", \"percentual\": 15.00 },\n    { \"ticker\": \"WEGE3\", \"percentual\": 10.00 }\n  ]\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_fluxo_8_carteira",
+      "_type": "request",
+      "parentId": "fld_fluxo_completo",
+      "name": "8. Consultar carteira — Cliente A",
+      "method": "GET",
+      "url": "{{ _.base_url }}/clientes/1/carteira",
+      "description": "Requer arquivo COTAHIST no diretório ./cotacoes/",
+      "headers": []
+    }
+  ]
+}
