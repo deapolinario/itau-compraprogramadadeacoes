@@ -69,10 +69,30 @@ public class RebalanceamentoService {
 
         Map<String, BigDecimal> cotacoes = cotahistParser.buscarCotacoes(new ArrayList<>(todosTickers));
 
+                List<Long> clienteIds = clientesAtivos.stream().map(Cliente::getId).toList();
+                List<ContaGrafica> contasFilhote = contaGraficaRepository
+                                .findAllByClienteInAndTipo(clienteIds, ContaGrafica.TipoConta.FILHOTE);
+                Map<Long, ContaGrafica> contasPorCliente = contasFilhote.stream()
+                                .collect(Collectors.toMap(c -> c.getCliente().getId(), c -> c));
+
+                List<Long> contaIds = contasFilhote.stream().map(ContaGrafica::getId).toList();
+                Map<String, Custodia> custodiasPorContaTicker = new HashMap<>();
+                Map<Long, List<Custodia>> custodiasPorConta = new HashMap<>();
+
+                if (!contaIds.isEmpty()) {
+                        List<Custodia> custodias = custodiaRepository
+                                        .findAllByContaInAndTickerIn(contaIds, new ArrayList<>(todosTickers));
+                        custodias.forEach(c -> {
+                                custodiasPorContaTicker.put(chaveCustodia(c.getConta().getId(), c.getTicker()), c);
+                                custodiasPorConta.computeIfAbsent(c.getConta().getId(), k -> new ArrayList<>()).add(c);
+                        });
+                }
+
         for (Cliente cliente : clientesAtivos) {
             try {
                 rebalancearCliente(cliente, removidos, adicionados, alterados,
-                        tickersNovos, cotacoes, cestaNova);
+                                                tickersNovos, cotacoes, contasPorCliente,
+                                                custodiasPorContaTicker, custodiasPorConta);
             } catch (Exception e) {
                 log.error("Erro ao rebalancear cliente {}: {}", cliente.getId(), e.getMessage(), e);
             }
@@ -80,11 +100,12 @@ public class RebalanceamentoService {
     }
 
     private void rebalancearCliente(Cliente cliente, Set<String> removidos, Set<String> adicionados,
-                                     Set<String> alterados, Map<String, BigDecimal> tickersNovos,
-                                     Map<String, BigDecimal> cotacoes, CestaRecomendacao cestaNova) {
-        ContaGrafica contaFilhote = contaGraficaRepository
-                .findByClienteIdAndTipo(cliente.getId(), ContaGrafica.TipoConta.FILHOTE)
-                .orElse(null);
+                                                                         Set<String> alterados, Map<String, BigDecimal> tickersNovos,
+                                                                         Map<String, BigDecimal> cotacoes,
+                                                                         Map<Long, ContaGrafica> contasPorCliente,
+                                                                         Map<String, Custodia> custodiasPorContaTicker,
+                                                                         Map<Long, List<Custodia>> custodiasPorConta) {
+                ContaGrafica contaFilhote = contasPorCliente.get(cliente.getId());
         if (contaFilhote == null) return;
 
         BigDecimal valorVendas = BigDecimal.ZERO;
@@ -93,8 +114,7 @@ public class RebalanceamentoService {
 
         // 9.2: Vender ativos removidos
         for (String ticker : removidos) {
-            Custodia pos = custodiaRepository.findByContaIdAndTicker(contaFilhote.getId(), ticker)
-                    .orElse(null);
+                        Custodia pos = custodiasPorContaTicker.get(chaveCustodia(contaFilhote.getId(), ticker));
             if (pos == null || pos.getQuantidade() == 0) continue;
 
             BigDecimal cotacao = cotacoes.getOrDefault(ticker, BigDecimal.ZERO);
@@ -115,11 +135,10 @@ public class RebalanceamentoService {
         }
 
         // 9.4: Ajustar ativos com percentual alterado
-        BigDecimal valorTotalCarteira = calcularValorTotal(contaFilhote, cotacoes);
+                BigDecimal valorTotalCarteira = calcularValorTotal(contaFilhote.getId(), cotacoes, custodiasPorConta);
 
         for (String ticker : alterados) {
-            Custodia pos = custodiaRepository.findByContaIdAndTicker(contaFilhote.getId(), ticker)
-                    .orElse(null);
+                        Custodia pos = custodiasPorContaTicker.get(chaveCustodia(contaFilhote.getId(), ticker));
             if (pos == null || pos.getQuantidade() == 0) continue;
 
             BigDecimal cotacao = cotacoes.getOrDefault(ticker, BigDecimal.ZERO);
@@ -164,8 +183,13 @@ public class RebalanceamentoService {
                 long qtdComprar = valorCompra.divide(cotacao, 0, RoundingMode.DOWN).longValue();
                 if (qtdComprar == 0) continue;
 
-                Custodia pos = custodiaRepository.findByContaIdAndTicker(contaFilhote.getId(), ticker)
-                        .orElse(new Custodia(contaFilhote, ticker));
+                                String chave = chaveCustodia(contaFilhote.getId(), ticker);
+                                Custodia pos = custodiasPorContaTicker.get(chave);
+                                if (pos == null) {
+                                        pos = new Custodia(contaFilhote, ticker);
+                                        custodiasPorContaTicker.put(chave, pos);
+                                        custodiasPorConta.computeIfAbsent(contaFilhote.getId(), k -> new ArrayList<>()).add(pos);
+                                }
 
                 pos.setPrecoMedio(calcularNovoPrecoMedio(pos, qtdComprar, cotacao));
                 pos.setQuantidade(pos.getQuantidade() + qtdComprar);
@@ -182,13 +206,18 @@ public class RebalanceamentoService {
         }
     }
 
-    private BigDecimal calcularValorTotal(ContaGrafica conta, Map<String, BigDecimal> cotacoes) {
-        return custodiaRepository.findAllByContaId(conta.getId()).stream()
+        private BigDecimal calcularValorTotal(Long contaId, Map<String, BigDecimal> cotacoes,
+                                                                                  Map<Long, List<Custodia>> custodiasPorConta) {
+                return custodiasPorConta.getOrDefault(contaId, List.of()).stream()
                 .filter(c -> c.getQuantidade() > 0)
                 .map(c -> cotacoes.getOrDefault(c.getTicker(), BigDecimal.ZERO)
                         .multiply(BigDecimal.valueOf(c.getQuantidade())))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
+
+        private String chaveCustodia(Long contaId, String ticker) {
+                return contaId + ":" + ticker;
+        }
 
     private BigDecimal calcularNovoPrecoMedio(Custodia pos, long qtdNova, BigDecimal preco) {
         if (pos.getQuantidade() == 0) return preco.setScale(6, RoundingMode.DOWN);

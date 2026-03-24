@@ -139,13 +139,19 @@ class FiscalServiceTest {
 
     @Test
     void calcularEPublicarIRVenda_totalAcima20k_prejuizo_naoPublicaIR() {
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        when(kafkaTemplate.send(any(), payloadCaptor.capture())).thenReturn(null);
+
         ContaGrafica conta = new ContaGrafica(cliente, "FILHOTE-001", ContaGrafica.TipoConta.FILHOTE);
         HistoricoOperacao venda = new HistoricoOperacao(cliente, conta, "PETR4",
                 HistoricoOperacao.TipoOperacao.VENDA, 100L, new BigDecimal("250.00"));
 
-        // Acima de 20k em vendas mas com prejuízo → não deve haver IR
+        // Acima de 20k em vendas com prejuízo: publica evento com IR zero
         fiscalService.calcularEPublicarIRVenda(cliente, List.of(venda), new BigDecimal("-800.00"));
 
-        verify(kafkaTemplate, never()).send(any(), any());
+        verify(kafkaTemplate, times(1)).send(any(), any());
+        assertThat(payloadCaptor.getValue()).isInstanceOf(String.class);
+        assertThat((String) payloadCaptor.getValue()).contains("\"tipo\":\"IR_VENDA\"");
+        assertThat((String) payloadCaptor.getValue()).contains("\"valorIR\":0");
     }
 }
