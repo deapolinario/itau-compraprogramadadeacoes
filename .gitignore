@@ -1,0 +1,25 @@
+# Build
+target/
+*.class
+*.jar
+*.war
+*.ear
+
+# IDE
+.idea/
+*.iml
+
+# Logs
+*.log
+logs/
+
+# Configuração local (nunca versionar senhas ou URLs locais)
+application-local.properties
+.env
+
+# Arquivos B3 grandes (Negócios à Vista — podem ter centenas de MB)
+cotacoes/*NEGOCIOSAVISTA*
+
+# SO
+.DS_Store
+Thumbs.db
