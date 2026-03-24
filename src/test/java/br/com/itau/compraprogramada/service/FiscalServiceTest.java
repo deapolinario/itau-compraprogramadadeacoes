@@ -29,12 +29,13 @@ class FiscalServiceTest {
     @Mock private EventoKafkaRepository eventoKafkaRepository;
     @Mock private HistoricoOperacaoRepository historicoRepository;
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private FiscalService fiscalService;
     private Cliente cliente;
 
     @BeforeEach
     void setup() {
-        fiscalService = new FiscalService(kafkaTemplate, eventoKafkaRepository, historicoRepository, new ObjectMapper());
+        fiscalService = new FiscalService(kafkaTemplate, eventoKafkaRepository, historicoRepository, objectMapper);
         cliente = new Cliente("João", "12345678901", "j@e.com", BigDecimal.valueOf(3000));
         cliente.setId(1L);
         lenient().when(eventoKafkaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -100,7 +101,7 @@ class FiscalServiceTest {
 
     @Test
     void calcularEPublicarIRVenda_listaVazia_naoFazNada() {
-        fiscalService.calcularEPublicarIRVenda(cliente, List.of());
+        fiscalService.calcularEPublicarIRVenda(cliente, List.of(), BigDecimal.ZERO);
 
         verify(kafkaTemplate, never()).send(any(), any());
     }
@@ -111,21 +112,46 @@ class FiscalServiceTest {
         HistoricoOperacao venda = new HistoricoOperacao(cliente, conta, "PETR4",
                 HistoricoOperacao.TipoOperacao.VENDA, 10L, new BigDecimal("150.00"));
 
-        fiscalService.calcularEPublicarIRVenda(cliente, List.of(venda));
+        fiscalService.calcularEPublicarIRVenda(cliente, List.of(venda), new BigDecimal("50.00"));
 
         verify(kafkaTemplate, never()).send(any(), any());
     }
 
     @Test
-    void calcularEPublicarIRVenda_totalAcima20k_publicaIR() {
-        when(kafkaTemplate.send(any(), any())).thenReturn(null);
+    void calcularEPublicarIRVenda_totalAcima20k_publicaIRComValorCorreto() throws Exception {
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        when(kafkaTemplate.send(any(), payloadCaptor.capture())).thenReturn(null);
 
         ContaGrafica conta = new ContaGrafica(cliente, "FILHOTE-001", ContaGrafica.TipoConta.FILHOTE);
         HistoricoOperacao venda = new HistoricoOperacao(cliente, conta, "PETR4",
                 HistoricoOperacao.TipoOperacao.VENDA, 100L, new BigDecimal("250.00"));
 
-        fiscalService.calcularEPublicarIRVenda(cliente, List.of(venda));
+        // lucroLiquido = R$ 5.000 → IR esperado = 5000 * 20% = R$ 1.000
+        fiscalService.calcularEPublicarIRVenda(cliente, List.of(venda), new BigDecimal("5000.00"));
 
-        verify(eventoKafkaRepository).save(any(EventoKafka.class));
+        String payload = (String) payloadCaptor.getValue();
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> mensagem = objectMapper.readValue(payload, java.util.Map.class);
+        assertThat(new BigDecimal(mensagem.get("valorIR").toString()))
+                .isEqualByComparingTo("1000.00");
+        assertThat(mensagem.get("tipo")).isEqualTo("IR_VENDA");
+    }
+
+    @Test
+    void calcularEPublicarIRVenda_totalAcima20k_prejuizo_naoPublicaIR() {
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        when(kafkaTemplate.send(any(), payloadCaptor.capture())).thenReturn(null);
+
+        ContaGrafica conta = new ContaGrafica(cliente, "FILHOTE-001", ContaGrafica.TipoConta.FILHOTE);
+        HistoricoOperacao venda = new HistoricoOperacao(cliente, conta, "PETR4",
+                HistoricoOperacao.TipoOperacao.VENDA, 100L, new BigDecimal("250.00"));
+
+        // Acima de 20k em vendas com prejuízo: publica evento com IR zero
+        fiscalService.calcularEPublicarIRVenda(cliente, List.of(venda), new BigDecimal("-800.00"));
+
+        verify(kafkaTemplate, times(1)).send(any(), any());
+        assertThat(payloadCaptor.getValue()).isInstanceOf(String.class);
+        assertThat((String) payloadCaptor.getValue()).contains("\"tipo\":\"IR_VENDA\"");
+        assertThat((String) payloadCaptor.getValue()).contains("\"valorIR\":0");
     }
 }

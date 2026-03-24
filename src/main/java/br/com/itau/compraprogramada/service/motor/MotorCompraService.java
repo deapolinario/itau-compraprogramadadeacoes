@@ -24,9 +24,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -82,6 +81,11 @@ public class MotorCompraService {
                 .map(c -> c.getValorMensal().divide(BigDecimal.valueOf(3), 2, RoundingMode.DOWN))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        if (totalConsolidado.compareTo(BigDecimal.ZERO) <= 0) {
+            log.warn("Total consolidado inválido para {}. Encerrando execução.", dataReferencia);
+            return;
+        }
+
         log.info("Total consolidado para {}: R$ {}", dataReferencia, totalConsolidado);
 
         // Cesta ativa
@@ -100,6 +104,11 @@ public class MotorCompraService {
         for (ItemCesta item : cesta.getItens()) {
             String ticker = item.getTicker();
             BigDecimal cotacao = cotacoes.get(ticker);
+            if (cotacao == null || cotacao.compareTo(BigDecimal.ZERO) <= 0) {
+                log.warn("Cotação inválida para ticker {}. Compra ignorada.", ticker);
+                continue;
+            }
+
             BigDecimal percentual = item.getPercentual().divide(BigDecimal.valueOf(100), 4, RoundingMode.DOWN);
             BigDecimal valorAlvo = totalConsolidado.multiply(percentual);
 
@@ -135,12 +144,42 @@ public class MotorCompraService {
     private void distribuirParaFilhotes(List<Cliente> clientes, CestaRecomendacao cesta,
                                          Map<String, BigDecimal> cotacoes,
                                          ContaGrafica contaMaster, BigDecimal totalConsolidado) {
+        // OTIMIZAÇÃO: Buscar todas as contas filhotes de uma vez ao invés de N queries
+        List<Long> clienteIds = clientes.stream().map(Cliente::getId).toList();
+        List<ContaGrafica> contasFilhote = contaGraficaRepository
+                .findAllByClienteInAndTipo(clienteIds, ContaGrafica.TipoConta.FILHOTE);
+        
+        Map<Long, ContaGrafica> contasMap = contasFilhote.stream()
+                .collect(Collectors.toMap(c -> c.getCliente().getId(), c -> c));
+
+        // OTIMIZAÇÃO: Buscar todas as custódias necessárias de uma vez
+        List<String> tickers = cesta.getItens().stream().map(ItemCesta::getTicker).toList();
+        List<Long> contaIds = new ArrayList<>(contasMap.values().stream()
+                .map(ContaGrafica::getId).toList());
+        contaIds.add(contaMaster.getId());
+        
+        List<Custodia> custodias = custodiaRepository.findAllByContaInAndTickerIn(contaIds, tickers);
+        Map<String, Custodia> custodiaMap = custodias.stream()
+                .collect(Collectors.toMap(
+                        c -> c.getConta().getId() + ":" + c.getTicker(),
+                        c -> c,
+                        (existing, replacement) -> {
+                            log.warn("Custódia duplicada detectada para conta+ticker '{}:{}'. Mantendo registro existente.",
+                                    existing.getConta().getId(), existing.getTicker());
+                            return existing;
+                        }
+                ));
+
         for (ItemCesta item : cesta.getItens()) {
             String ticker = item.getTicker();
             BigDecimal cotacao = cotacoes.get(ticker);
+            if (cotacao == null || cotacao.compareTo(BigDecimal.ZERO) <= 0) {
+                log.warn("Cotação inválida para ticker {}. Distribuição ignorada.", ticker);
+                continue;
+            }
 
-            Custodia saldoMaster = custodiaRepository.findByContaIdAndTicker(contaMaster.getId(), ticker)
-                    .orElse(new Custodia(contaMaster, ticker));
+            Custodia saldoMaster = custodiaMap.getOrDefault(contaMaster.getId() + ":" + ticker,
+                    new Custodia(contaMaster, ticker));
 
             long totalDisponivel = saldoMaster.getQuantidade();
             if (totalDisponivel == 0) continue;
@@ -157,13 +196,15 @@ public class MotorCompraService {
 
                 if (qtdCliente == 0) continue;
 
-                ContaGrafica contaFilhote = contaGraficaRepository
-                        .findByClienteIdAndTipo(cliente.getId(), ContaGrafica.TipoConta.FILHOTE)
-                        .orElseThrow();
+                ContaGrafica contaFilhote = contasMap.get(cliente.getId());
+                if (contaFilhote == null) {
+                    log.warn("Conta filhote não encontrada para cliente {}", cliente.getId());
+                    continue;
+                }
 
-                Custodia custodiaFilhote = custodiaRepository
-                        .findByContaIdAndTicker(contaFilhote.getId(), ticker)
-                        .orElse(new Custodia(contaFilhote, ticker));
+                String custodiaKey = contaFilhote.getId() + ":" + ticker;
+                Custodia custodiaFilhote = custodiaMap.getOrDefault(custodiaKey,
+                        new Custodia(contaFilhote, ticker));
 
                 // Atualiza PM antes de alterar quantidade
                 BigDecimal novoPrecoMedio = precoMedioService.calcular(custodiaFilhote, qtdCliente, cotacao);

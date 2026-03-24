@@ -49,11 +49,11 @@ class RebalanceamentoServiceTest {
         contaFilhote.setId(2L);
 
         lenient().when(clienteRepository.findAllByAtivoTrue()).thenReturn(List.of(cliente));
-        lenient().when(contaGraficaRepository.findByClienteIdAndTipo(1L, ContaGrafica.TipoConta.FILHOTE))
-                .thenReturn(Optional.of(contaFilhote));
+    lenient().when(contaGraficaRepository.findAllByClienteInAndTipo(anyList(), eq(ContaGrafica.TipoConta.FILHOTE)))
+        .thenReturn(List.of(contaFilhote));
         lenient().when(historicoRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(custodiaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(custodiaRepository.findAllByContaId(2L)).thenReturn(List.of());
+    lenient().when(custodiaRepository.findAllByContaInAndTickerIn(anyList(), anyList())).thenReturn(List.of());
     }
 
     @Test
@@ -67,8 +67,8 @@ class RebalanceamentoServiceTest {
 
         when(cotahistParser.buscarCotacoes(anyList()))
                 .thenReturn(Map.of("BBDC4", new BigDecimal("15.00"), "ABEV3", new BigDecimal("14.00")));
-        when(custodiaRepository.findByContaIdAndTicker(2L, "BBDC4")).thenReturn(Optional.of(posBBDC4));
-        when(custodiaRepository.findByContaIdAndTicker(2L, "ABEV3")).thenReturn(Optional.empty());
+        when(custodiaRepository.findAllByContaInAndTickerIn(anyList(), anyList()))
+            .thenReturn(List.of(posBBDC4));
 
         rebalanceamentoService.executar(antiga, nova);
 
@@ -96,6 +96,49 @@ class RebalanceamentoServiceTest {
         rebalanceamentoService.executar(criarCesta("PETR4", "100.00"), criarCesta("VALE3", "100.00"));
 
         verify(cotahistParser, never()).buscarCotacoes(any());
+    }
+
+    @Test
+    void executar_ativoRemovido_passaLucroLiquidoCorretoParaFiscal() {
+        // PM = R$ 14,00, cotação = R$ 16,00, qtd = 10 → lucro = (16 - 14) * 10 = R$ 20,00
+        CestaRecomendacao antiga = criarCesta("BBDC4", "100.00");
+        CestaRecomendacao nova = criarCesta("VALE3", "100.00");
+
+        Custodia posBBDC4 = new Custodia(contaFilhote, "BBDC4");
+        posBBDC4.setQuantidade(10L);
+        posBBDC4.setPrecoMedio(new BigDecimal("14.00"));
+
+        when(cotahistParser.buscarCotacoes(anyList()))
+                .thenReturn(Map.of("BBDC4", new BigDecimal("16.00"), "VALE3", new BigDecimal("10.00")));
+        when(custodiaRepository.findAllByContaInAndTickerIn(anyList(), anyList()))
+            .thenReturn(List.of(posBBDC4));
+
+        rebalanceamentoService.executar(antiga, nova);
+
+        ArgumentCaptor<BigDecimal> lucroCaptor = ArgumentCaptor.forClass(BigDecimal.class);
+        verify(fiscalService).calcularEPublicarIRVenda(eq(cliente), anyList(), lucroCaptor.capture());
+        assertThat(lucroCaptor.getValue()).isEqualByComparingTo("20.00");
+    }
+
+    @Test
+    void executar_ativoRemovido_comCotacaoZero_ignoraVendaSemErro() {
+        CestaRecomendacao antiga = criarCesta("BBDC4", "100.00");
+        CestaRecomendacao nova = criarCesta("VALE3", "100.00");
+
+        Custodia posBBDC4 = new Custodia(contaFilhote, "BBDC4");
+        posBBDC4.setQuantidade(10L);
+        posBBDC4.setPrecoMedio(new BigDecimal("14.00"));
+
+        when(cotahistParser.buscarCotacoes(anyList()))
+                .thenReturn(Map.of("BBDC4", BigDecimal.ZERO, "VALE3", new BigDecimal("10.00")));
+        when(custodiaRepository.findAllByContaInAndTickerIn(anyList(), anyList()))
+                .thenReturn(List.of(posBBDC4));
+
+        rebalanceamentoService.executar(antiga, nova);
+
+        assertThat(posBBDC4.getQuantidade()).isEqualTo(10L);
+        verify(historicoRepository, never()).save(any());
+        verify(fiscalService, never()).calcularEPublicarIRVenda(any(), anyList(), any());
     }
 
     private CestaRecomendacao criarCesta(String ticker, String percentual) {
