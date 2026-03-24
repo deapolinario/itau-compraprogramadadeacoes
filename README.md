@@ -451,3 +451,33 @@ As principais decisões de design estão documentadas como ADRs em [`docs/adr/`]
 docker compose down          # para os containers
 docker compose down -v       # para e remove os volumes (apaga dados)
 ```
+
+---
+
+## Desenvolvimento Assistido por IA
+
+Este projeto foi desenvolvido integralmente com assistência de Inteligência Artificial. **Nenhuma linha de código, documentação ou configuração foi escrita manualmente** — todo o conteúdo do repositório foi gerado, revisado e corrigido com o auxílio das ferramentas abaixo.
+
+### Ferramentas utilizadas
+
+| Ferramenta | Modo | Função no projeto |
+|---|---|---|
+| **Claude Code** (Sonnet 4.6) | Agent | Implementação de código, code review, correção de bugs, refatoração e geração de testes unitários |
+| **GitHub Copilot** | Agent (Auto) | Correção de problemas de performance (N+1 queries) e sugestões de implementação em contexto de IDE |
+
+### Metodologia: SDD com OpenSpec
+
+O desenvolvimento seguiu a metodologia **Specification-Driven Development (SDD)** utilizando as skills do **OpenSpec** integradas ao Claude Code:
+
+- **`/openspec-explore`** — exploração de requisitos e investigação de problemas antes de propor soluções
+- **`/openspec-propose`** — geração de proposta de mudança com design, especificação e lista de tarefas em um único passo
+- **`/openspec-apply-change`** — implementação guiada pelas tarefas geradas na proposta
+- **`/openspec-archive-change`** — arquivamento da mudança ao concluir a implementação
+
+### Geração do PRD
+
+O Product Requirements Document ([`docs/prd/PRD.md`](docs/prd/PRD.md)) foi gerado com a skill de PRD localizada em `.agents/skills/prd/`, que estrutura automaticamente os requisitos de produto a partir da descrição do desafio técnico.
+
+### Observação
+
+A adoção deliberada dessas ferramentas em modo totalmente assistido tem o objetivo de demonstrar a viabilidade e os limites do desenvolvimento de software orientado por IA — incluindo os pontos onde a supervisão humana continua sendo necessária, como decisões de negócio, revisão de comportamento fiscal e definição de requisitos não-funcionais.
