@@ -85,6 +85,133 @@ src/main/java/br/com/itau/compraprogramada/
 
 ---
 
+## Arquitetura de Software
+
+### Padrão Arquitetural: Layered Architecture com elementos de DDD
+
+A aplicação adota uma **Arquitetura em Camadas** (Layered Architecture) clássica do ecossistema Spring Boot, com alguns elementos de **Domain-Driven Design (DDD)** na modelagem do domínio financeiro. Não é Hexagonal nem Clean Architecture — a escolha deliberada foi pela simplicidade e produtividade que o modelo em camadas oferece para um bounded context único.
+
+#### Por que não Hexagonal / Clean Architecture?
+
+| Aspecto | Decisão tomada |
+|---|---|
+| Portas e adaptadores | Não aplicado — há um único banco relacional e um único broker Kafka; a abstração de portas adicionaria complexidade sem benefício real |
+| Casos de uso explícitos | Os serviços Spring (`@Service`) cumprem esse papel sem uma camada extra de UseCases/Interactors |
+| Inversão de dependência | Garantida pelo Spring IoC; interfaces de repositório criam a separação suficiente entre domínio e infraestrutura |
+
+---
+
+### Visão Geral das Camadas
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                   Presentation Layer                      │
+│  ClienteController  │  CestaController  │  RentabilidadeController  │
+│         REST endpoints + validação de entrada + Swagger   │
+└────────────────────────┬─────────────────────────────────┘
+                         │ DTOs (Request/Response)
+┌────────────────────────▼─────────────────────────────────┐
+│                   Application / Service Layer             │
+│  ClienteService  │  CestaService  │  MotorCompraService   │
+│  RebalanceamentoService  │  RentabilidadeService  │  FiscalService  │
+│       Orquestração de regras de negócio, transações,      │
+│       publicação de eventos, processamento assíncrono     │
+└──────────┬──────────────────────────────────┬────────────┘
+           │ Domain Entities                  │ Repositories (interfaces)
+┌──────────▼───────────────┐  ┌───────────────▼────────────┐
+│      Domain Layer        │  │   Infrastructure Layer      │
+│  Cliente  │  ContaGrafica│  │  Spring Data JPA repositories│
+│  Custodia │  CestaRecom. │  │  KafkaTemplate              │
+│  ItemCesta│  ExecucaoMotor│  │  CotahistParser (B3)        │
+│  HistoricoOperacao        │  │  Flyway migrations          │
+│  EventoKafka              │  │  AsyncConfig │ KafkaConfig  │
+└──────────────────────────┘  └─────────────────────────────┘
+```
+
+---
+
+### Camada de Domínio (Domain Layer)
+
+O domínio é rico: as entidades encapsulam não só dados, mas regras e invariantes do negócio financeiro.
+
+| Entidade / Aggregate | Responsabilidade |
+|---|---|
+| `Cliente` | Dados cadastrais e status de adesão; CPF único |
+| `ContaGrafica` | Segregação de contas — `MASTER` (compra em lote) e `FILHOTE` (custódia individual) |
+| `Custodia` | Posição de um ativo numa conta: quantidade + preço médio ponderado |
+| `CestaRecomendacao` + `ItemCesta` | Template de alocação (% por ticker); método `desativar()` garante consistência na troca de cestas |
+| `ExecucaoMotor` | Controle de idempotência das execuções do motor (PENDENTE → EM_EXECUCAO → CONCLUIDO / ERRO) |
+| `HistoricoOperacao` | Trilha auditável de todas as compras e vendas |
+| `EventoKafka` | Outbox de eventos fiscais para garantir entrega ao Kafka mesmo em falhas |
+
+---
+
+### Camada de Serviço (Application Layer)
+
+Os serviços orquestram os fluxos de negócio e são o coração da aplicação:
+
+| Serviço | Responsabilidade |
+|---|---|
+| `ClienteService` | Ciclo de vida do cliente: adesão, saída, alteração de aporte, consulta |
+| `CestaService` | Criação de cestas (desativa a anterior) + publicação do `CestaAlteradaEvent` |
+| `MotorCompraService` | Engine principal: compra consolidada no MASTER, distribuição proporcional às FILHOTES, controle de idempotência |
+| `MotorCompraScheduler` | Disparo agendado nos dias 5, 15 e 25 às 09h (com ajuste para segunda-feira em fins de semana) |
+| `RebalanceamentoService` | Rebalanceia carteiras na troca de cesta: vende ativos removidos, ajusta percentuais, compra novos |
+| `RebalanceamentoListener` | Listener assíncrono (`@Async`) do `CestaAlteradaEvent` — desacopla rebalanceamento da criação de cesta |
+| `RentabilidadeService` | Calcula P&L, rentabilidade percentual e composição atual da carteira |
+| `FiscalService` | Apura IR dedo-duro (0,005%) e IR sobre vendas (20%) e publica eventos no Kafka |
+| `PrecoMedioService` | Cálculo de preço médio ponderado com 6 casas decimais (`ROUND_DOWN`) |
+
+---
+
+### Padrões de Design Aplicados
+
+| Padrão | Onde é aplicado |
+|---|---|
+| **Repository** | `ClienteRepository`, `CustodiaRepository` etc. — abstrai acesso a dados via Spring Data JPA |
+| **DTO (Data Transfer Object)** | `ClienteResponse`, `CestaResponse`, `AdesaoRequest` — separa contrato de API do modelo de domínio; fábricas estáticas `of()` fazem a conversão |
+| **Domain Event** | `CestaAlteradaEvent` publicado pelo `CestaService` e consumido assincronamente pelo `RebalanceamentoListener` via Spring `ApplicationEventPublisher` |
+| **Outbox Pattern** | `EventoKafka` armazena eventos fiscais no banco quando o Kafka está indisponível, garantindo entrega eventual |
+| **Idempotency Guard** | `ExecucaoMotor` com chave única por `dataReferencia` impede dupla execução do motor no mesmo ciclo |
+| **Scheduler** | `MotorCompraScheduler` com cron configurável (`@Scheduled`) + lógica de desvio de fim de semana |
+| **Strategy** | `PrecoMedioService` encapsula o algoritmo de cálculo de preço médio, isolando-o dos serviços que o consomem |
+| **Parser** | `CotahistParser` lê arquivos de largura fixa do padrão B3 COTAHIST e mantém apenas o registro mais recente por ticker |
+| **Global Exception Handler** | `GlobalExceptionHandler` com `@RestControllerAdvice` centraliza o mapeamento de `NegocioException` para respostas HTTP semânticas |
+
+---
+
+### Comunicação entre Camadas
+
+```
+Requisição HTTP
+    → Controller (valida input, converte DTO)
+        → Service (@Transactional, regras de negócio)
+            → Repository (query/persist via JPA)
+            → Domain Entity (invariantes de negócio)
+            → ApplicationEventPublisher (domain events)
+                → Listener (@Async — thread pool dedicada)
+                    → Service de rebalanceamento
+            → KafkaTemplate (eventos fiscais)
+                → Fallback: EventoKafka persistido no banco
+    → Controller (converte domínio → DTO de resposta)
+← Resposta JSON
+```
+
+### Threading e Assincronismo
+
+O `AsyncConfig` configura um `ThreadPoolTaskExecutor` dedicado ao rebalanceamento:
+
+| Parâmetro | Valor |
+|---|---|
+| Core threads | 5 |
+| Max threads | 10 |
+| Queue capacity | 100 |
+| Thread prefix | `rebalanceamento-` |
+
+Isso garante que a criação de uma nova cesta Top Five não bloqueia a resposta HTTP enquanto o rebalanceamento das carteiras de todos os clientes é processado em background.
+
+---
+
 ## Pré-requisitos
 
 - **Java 21** (`java -version`)
