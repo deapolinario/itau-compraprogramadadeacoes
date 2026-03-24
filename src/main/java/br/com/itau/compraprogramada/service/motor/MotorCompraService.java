@@ -81,6 +81,11 @@ public class MotorCompraService {
                 .map(c -> c.getValorMensal().divide(BigDecimal.valueOf(3), 2, RoundingMode.DOWN))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        if (totalConsolidado.compareTo(BigDecimal.ZERO) <= 0) {
+            log.warn("Total consolidado inválido para {}. Encerrando execução.", dataReferencia);
+            return;
+        }
+
         log.info("Total consolidado para {}: R$ {}", dataReferencia, totalConsolidado);
 
         // Cesta ativa
@@ -99,6 +104,11 @@ public class MotorCompraService {
         for (ItemCesta item : cesta.getItens()) {
             String ticker = item.getTicker();
             BigDecimal cotacao = cotacoes.get(ticker);
+            if (cotacao == null || cotacao.compareTo(BigDecimal.ZERO) <= 0) {
+                log.warn("Cotação inválida para ticker {}. Compra ignorada.", ticker);
+                continue;
+            }
+
             BigDecimal percentual = item.getPercentual().divide(BigDecimal.valueOf(100), 4, RoundingMode.DOWN);
             BigDecimal valorAlvo = totalConsolidado.multiply(percentual);
 
@@ -159,6 +169,10 @@ public class MotorCompraService {
         for (ItemCesta item : cesta.getItens()) {
             String ticker = item.getTicker();
             BigDecimal cotacao = cotacoes.get(ticker);
+            if (cotacao == null || cotacao.compareTo(BigDecimal.ZERO) <= 0) {
+                log.warn("Cotação inválida para ticker {}. Distribuição ignorada.", ticker);
+                continue;
+            }
 
             Custodia saldoMaster = custodiaMap.getOrDefault(contaMaster.getId() + ":" + ticker,
                     new Custodia(contaMaster, ticker));

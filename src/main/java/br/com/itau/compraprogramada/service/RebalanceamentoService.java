@@ -118,6 +118,11 @@ public class RebalanceamentoService {
             if (pos == null || pos.getQuantidade() == 0) continue;
 
             BigDecimal cotacao = cotacoes.getOrDefault(ticker, BigDecimal.ZERO);
+                        if (cotacao.compareTo(BigDecimal.ZERO) <= 0) {
+                                log.warn("Cotação inválida para ticker {} no rebalanceamento de venda. Operação ignorada.", ticker);
+                                continue;
+                        }
+
             BigDecimal valorVenda = cotacao.multiply(BigDecimal.valueOf(pos.getQuantidade()));
             BigDecimal lucro = cotacao.subtract(pos.getPrecoMedio())
                     .multiply(BigDecimal.valueOf(pos.getQuantidade()));
@@ -142,6 +147,11 @@ public class RebalanceamentoService {
             if (pos == null || pos.getQuantidade() == 0) continue;
 
             BigDecimal cotacao = cotacoes.getOrDefault(ticker, BigDecimal.ZERO);
+                        if (cotacao.compareTo(BigDecimal.ZERO) <= 0) {
+                                log.warn("Cotação inválida para ticker {} no rebalanceamento de ajuste. Operação ignorada.", ticker);
+                                continue;
+                        }
+
             BigDecimal percentualNovo = tickersNovos.get(ticker).divide(BigDecimal.valueOf(100), 4, RoundingMode.DOWN);
             BigDecimal valorAlvo = valorTotalCarteira.multiply(percentualNovo);
             BigDecimal valorAtual = cotacao.multiply(BigDecimal.valueOf(pos.getQuantidade()));
@@ -173,7 +183,15 @@ public class RebalanceamentoService {
                     .map(tickersNovos::get)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+                        if (somaPercentuaisNovos.compareTo(BigDecimal.ZERO) <= 0) {
+                                log.warn("Soma dos percentuais dos ativos adicionados é inválida. Compras de rebalanceamento ignoradas.");
+                        }
+
             for (String ticker : adicionados) {
+                                if (somaPercentuaisNovos.compareTo(BigDecimal.ZERO) <= 0) {
+                                        break;
+                                }
+
                 BigDecimal cotacao = cotacoes.getOrDefault(ticker, BigDecimal.ZERO);
                 if (cotacao.compareTo(BigDecimal.ZERO) == 0) continue;
 

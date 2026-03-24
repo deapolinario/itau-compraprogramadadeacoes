@@ -156,6 +156,25 @@ class MotorCompraServiceTest {
         verify(historicoRepository, times(1)).save(any());
     }
 
+    @Test
+    void executar_cotacaoZero_naoDividePorZeroENaoRegistraOperacoes() {
+        Cliente clienteA = criarCliente(1L, "3000.00");
+        when(clienteRepository.findAllByAtivoTrue()).thenReturn(List.of(clienteA));
+
+        CestaRecomendacao cesta = criarCesta("PETR4", "100.00");
+        when(cestaRepository.findByAtivoTrue()).thenReturn(Optional.of(cesta));
+        when(cotahistParser.buscarCotacoes(any())).thenReturn(Map.of("PETR4", BigDecimal.ZERO));
+
+        ContaGrafica master = new ContaGrafica("MASTER-001", ContaGrafica.TipoConta.MASTER);
+        master.setId(1L);
+        when(contaGraficaRepository.findByTipo(ContaGrafica.TipoConta.MASTER)).thenReturn(Optional.of(master));
+
+        motorCompraService.executar(dataRef);
+
+        verify(historicoRepository, never()).save(any());
+        verify(fiscalService, never()).publicarIRDedoDuro(any(), anyString(), anyLong(), any());
+    }
+
     private Cliente criarCliente(Long id, String valorMensal) {
         Cliente c = new Cliente("Cliente", "12345678901", "c@e.com", new BigDecimal(valorMensal));
         c.setId(id);

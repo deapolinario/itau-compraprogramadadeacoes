@@ -120,6 +120,27 @@ class RebalanceamentoServiceTest {
         assertThat(lucroCaptor.getValue()).isEqualByComparingTo("20.00");
     }
 
+    @Test
+    void executar_ativoRemovido_comCotacaoZero_ignoraVendaSemErro() {
+        CestaRecomendacao antiga = criarCesta("BBDC4", "100.00");
+        CestaRecomendacao nova = criarCesta("VALE3", "100.00");
+
+        Custodia posBBDC4 = new Custodia(contaFilhote, "BBDC4");
+        posBBDC4.setQuantidade(10L);
+        posBBDC4.setPrecoMedio(new BigDecimal("14.00"));
+
+        when(cotahistParser.buscarCotacoes(anyList()))
+                .thenReturn(Map.of("BBDC4", BigDecimal.ZERO, "VALE3", new BigDecimal("10.00")));
+        when(custodiaRepository.findAllByContaInAndTickerIn(anyList(), anyList()))
+                .thenReturn(List.of(posBBDC4));
+
+        rebalanceamentoService.executar(antiga, nova);
+
+        assertThat(posBBDC4.getQuantidade()).isEqualTo(10L);
+        verify(historicoRepository, never()).save(any());
+        verify(fiscalService, never()).calcularEPublicarIRVenda(any(), anyList(), any());
+    }
+
     private CestaRecomendacao criarCesta(String ticker, String percentual) {
         CestaRecomendacao cesta = new CestaRecomendacao();
         cesta.setId((long) (Math.random() * 1000));
