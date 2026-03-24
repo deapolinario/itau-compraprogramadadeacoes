@@ -100,7 +100,7 @@ class FiscalServiceTest {
 
     @Test
     void calcularEPublicarIRVenda_listaVazia_naoFazNada() {
-        fiscalService.calcularEPublicarIRVenda(cliente, List.of());
+        fiscalService.calcularEPublicarIRVenda(cliente, List.of(), BigDecimal.ZERO);
 
         verify(kafkaTemplate, never()).send(any(), any());
     }
@@ -111,21 +111,41 @@ class FiscalServiceTest {
         HistoricoOperacao venda = new HistoricoOperacao(cliente, conta, "PETR4",
                 HistoricoOperacao.TipoOperacao.VENDA, 10L, new BigDecimal("150.00"));
 
-        fiscalService.calcularEPublicarIRVenda(cliente, List.of(venda));
+        fiscalService.calcularEPublicarIRVenda(cliente, List.of(venda), new BigDecimal("50.00"));
 
         verify(kafkaTemplate, never()).send(any(), any());
     }
 
     @Test
-    void calcularEPublicarIRVenda_totalAcima20k_publicaIR() {
-        when(kafkaTemplate.send(any(), any())).thenReturn(null);
+    void calcularEPublicarIRVenda_totalAcima20k_publicaIRComValorCorreto() throws Exception {
+        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
+        when(kafkaTemplate.send(any(), payloadCaptor.capture())).thenReturn(null);
 
         ContaGrafica conta = new ContaGrafica(cliente, "FILHOTE-001", ContaGrafica.TipoConta.FILHOTE);
         HistoricoOperacao venda = new HistoricoOperacao(cliente, conta, "PETR4",
                 HistoricoOperacao.TipoOperacao.VENDA, 100L, new BigDecimal("250.00"));
 
-        fiscalService.calcularEPublicarIRVenda(cliente, List.of(venda));
+        // lucroLiquido = R$ 5.000 → IR esperado = 5000 * 20% = R$ 1.000
+        fiscalService.calcularEPublicarIRVenda(cliente, List.of(venda), new BigDecimal("5000.00"));
 
-        verify(eventoKafkaRepository).save(any(EventoKafka.class));
+        String payload = (String) payloadCaptor.getValue();
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> mensagem = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(payload, java.util.Map.class);
+        assertThat(new BigDecimal(mensagem.get("valorIR").toString()))
+                .isEqualByComparingTo("1000.00");
+        assertThat(mensagem.get("tipo")).isEqualTo("IR_VENDA");
+    }
+
+    @Test
+    void calcularEPublicarIRVenda_totalAcima20k_prejuizo_naoPublicaIR() {
+        ContaGrafica conta = new ContaGrafica(cliente, "FILHOTE-001", ContaGrafica.TipoConta.FILHOTE);
+        HistoricoOperacao venda = new HistoricoOperacao(cliente, conta, "PETR4",
+                HistoricoOperacao.TipoOperacao.VENDA, 100L, new BigDecimal("250.00"));
+
+        // Acima de 20k em vendas mas com prejuízo → não deve haver IR
+        fiscalService.calcularEPublicarIRVenda(cliente, List.of(venda), new BigDecimal("-800.00"));
+
+        verify(kafkaTemplate, never()).send(any(), any());
     }
 }

@@ -67,7 +67,7 @@ public class FiscalService {
      * Calcula e publica IR sobre vendas do mês (regra R$ 20.000).
      * Chamado após rebalanceamento.
      */
-    public void calcularEPublicarIRVenda(Cliente cliente, List<HistoricoOperacao> vendas) {
+    public void calcularEPublicarIRVenda(Cliente cliente, List<HistoricoOperacao> vendas, BigDecimal lucroLiquido) {
         if (vendas.isEmpty()) return;
 
         BigDecimal totalVendas = vendas.stream()
@@ -78,12 +78,6 @@ public class FiscalService {
             log.debug("Cliente {} isento de IR (total vendas: R$ {})", cliente.getId(), totalVendas);
             return;
         }
-
-        BigDecimal lucroLiquido = vendas.stream()
-                .map(v -> v.getPrecoUnitario().subtract(v.getConta().getCliente() != null
-                        ? BigDecimal.ZERO : BigDecimal.ZERO) // PM vem da custódia
-                        .multiply(BigDecimal.valueOf(v.getQuantidade())))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         BigDecimal valorIR = lucroLiquido.compareTo(BigDecimal.ZERO) <= 0
                 ? BigDecimal.ZERO

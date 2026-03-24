@@ -178,7 +178,7 @@ public class RebalanceamentoService {
 
         // 8.5: Publica IR venda
         if (!vendasDoMes.isEmpty()) {
-            fiscalService.calcularEPublicarIRVenda(cliente, vendasDoMes);
+            fiscalService.calcularEPublicarIRVenda(cliente, vendasDoMes, lucroLiquido);
         }
     }
 

@@ -98,6 +98,28 @@ class RebalanceamentoServiceTest {
         verify(cotahistParser, never()).buscarCotacoes(any());
     }
 
+    @Test
+    void executar_ativoRemovido_passaLucroLiquidoCorretoParaFiscal() {
+        // PM = R$ 14,00, cotação = R$ 16,00, qtd = 10 → lucro = (16 - 14) * 10 = R$ 20,00
+        CestaRecomendacao antiga = criarCesta("BBDC4", "100.00");
+        CestaRecomendacao nova = criarCesta("VALE3", "100.00");
+
+        Custodia posBBDC4 = new Custodia(contaFilhote, "BBDC4");
+        posBBDC4.setQuantidade(10L);
+        posBBDC4.setPrecoMedio(new BigDecimal("14.00"));
+
+        when(cotahistParser.buscarCotacoes(anyList()))
+                .thenReturn(Map.of("BBDC4", new BigDecimal("16.00"), "VALE3", new BigDecimal("10.00")));
+        when(custodiaRepository.findByContaIdAndTicker(2L, "BBDC4")).thenReturn(Optional.of(posBBDC4));
+        when(custodiaRepository.findByContaIdAndTicker(2L, "VALE3")).thenReturn(Optional.empty());
+
+        rebalanceamentoService.executar(antiga, nova);
+
+        ArgumentCaptor<BigDecimal> lucroCaptor = ArgumentCaptor.forClass(BigDecimal.class);
+        verify(fiscalService).calcularEPublicarIRVenda(eq(cliente), anyList(), lucroCaptor.capture());
+        assertThat(lucroCaptor.getValue()).isEqualByComparingTo("20.00");
+    }
+
     private CestaRecomendacao criarCesta(String ticker, String percentual) {
         CestaRecomendacao cesta = new CestaRecomendacao();
         cesta.setId((long) (Math.random() * 1000));

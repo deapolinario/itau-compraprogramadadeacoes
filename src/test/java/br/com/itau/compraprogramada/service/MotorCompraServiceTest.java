@@ -12,6 +12,7 @@ import br.com.itau.compraprogramada.service.motor.MotorCompraService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -79,7 +80,7 @@ class MotorCompraServiceTest {
         CestaRecomendacao cesta = criarCesta("PETR4", "100.00");
         when(cestaRepository.findByAtivoTrue()).thenReturn(Optional.of(cesta));
 
-        // PETR4: R$ 35,00
+        // PETR4: R$ 35,00 → TRUNC(1000 / 35) = 28 ações (todas fracionárias)
         when(cotahistParser.buscarCotacoes(any())).thenReturn(Map.of("PETR4", new BigDecimal("35.00")));
 
         ContaGrafica master = new ContaGrafica("MASTER-001", ContaGrafica.TipoConta.MASTER);
@@ -93,19 +94,28 @@ class MotorCompraServiceTest {
 
         ContaGrafica filhote = new ContaGrafica(clienteA, "FILHOTE-001", ContaGrafica.TipoConta.FILHOTE);
         filhote.setId(2L);
-        when(contaGraficaRepository.findByClienteIdAndTipo(1L, ContaGrafica.TipoConta.FILHOTE))
-                .thenReturn(Optional.of(filhote));
+
+        // Batch queries inseridas pelo fix de N+1 do Copilot
+        when(contaGraficaRepository.findAllByClienteInAndTipo(anyList(), eq(ContaGrafica.TipoConta.FILHOTE)))
+                .thenReturn(List.of(filhote));
 
         Custodia custodiaFilhote = new Custodia(filhote, "PETR4");
-        when(custodiaRepository.findByContaIdAndTicker(2L, "PETR4")).thenReturn(Optional.of(custodiaFilhote));
+        when(custodiaRepository.findAllByContaInAndTickerIn(anyList(), anyList()))
+                .thenAnswer(inv -> List.of(saldoMaster, custodiaFilhote));
+
         when(precoMedioService.calcular(any(), anyLong(), any())).thenReturn(new BigDecimal("35.00"));
         when(historicoRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         motorCompraService.executar(dataRef);
 
-        // TRUNC(1000 / 35) = 28 ações → todas fracionárias (< 100)
-        // Saldo master = 28, distribui 28 para clienteA (100% do total)
-        verify(custodiaRepository, atLeast(1)).save(any(Custodia.class));
+        // Saldo master = 28, distribui 28 para clienteA (único cliente, 100% do total)
+        ArgumentCaptor<Custodia> custodiaCaptor = ArgumentCaptor.forClass(Custodia.class);
+        verify(custodiaRepository, atLeast(2)).save(custodiaCaptor.capture());
+        long qtdFilhote = custodiaCaptor.getAllValues().stream()
+                .filter(c -> c.getConta().getId().equals(2L))
+                .mapToLong(Custodia::getQuantidade)
+                .max().orElse(0L);
+        assertThat(qtdFilhote).isEqualTo(28L);
     }
 
     @Test
@@ -121,7 +131,7 @@ class MotorCompraServiceTest {
         master.setId(1L);
         when(contaGraficaRepository.findByTipo(ContaGrafica.TipoConta.MASTER)).thenReturn(Optional.of(master));
 
-        // Saldo master = 50 (maior que qtd bruta = 28)
+        // Saldo master = 50 (maior que qtd bruta = 28) → não deve disparar nova compra
         Custodia saldoMaster = new Custodia(master, "PETR4");
         saldoMaster.setQuantidade(50L);
         when(custodiaRepository.findByContaIdAndTicker(1L, "PETR4")).thenReturn(Optional.of(saldoMaster));
@@ -129,16 +139,21 @@ class MotorCompraServiceTest {
 
         ContaGrafica filhote = new ContaGrafica(clienteA, "FILHOTE-001", ContaGrafica.TipoConta.FILHOTE);
         filhote.setId(2L);
-        when(contaGraficaRepository.findByClienteIdAndTipo(1L, ContaGrafica.TipoConta.FILHOTE))
-                .thenReturn(Optional.of(filhote));
-        when(custodiaRepository.findByContaIdAndTicker(2L, "PETR4")).thenReturn(Optional.of(new Custodia(filhote, "PETR4")));
+
+        when(contaGraficaRepository.findAllByClienteInAndTipo(anyList(), eq(ContaGrafica.TipoConta.FILHOTE)))
+                .thenReturn(List.of(filhote));
+
+        Custodia custodiaFilhote = new Custodia(filhote, "PETR4");
+        when(custodiaRepository.findAllByContaInAndTickerIn(anyList(), anyList()))
+                .thenAnswer(inv -> List.of(saldoMaster, custodiaFilhote));
+
         when(precoMedioService.calcular(any(), anyLong(), any())).thenReturn(new BigDecimal("35.00"));
         when(historicoRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         motorCompraService.executar(dataRef);
 
-        // Não deve ter registrado compra fracionária (saldo master já supria)
-        verify(historicoRepository, atLeast(1)).save(any()); // distribuição
+        // Não houve compra nova na master (saldo já suficiente) — só distribuição para o filhote
+        verify(historicoRepository, times(1)).save(any());
     }
 
     private Cliente criarCliente(Long id, String valorMensal) {
